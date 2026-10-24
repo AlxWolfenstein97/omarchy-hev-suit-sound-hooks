@@ -1,0 +1,10 @@
+#!/bin/bash
+# omarchy-sound <name>
+# Plays ~/.local/state/omarchy/current/theme/sounds/<name>.ogg when present.
+# No theme file → silence (no freedesktop fallback).
+NAME=$1
+[[ -n $NAME ]] || exit 0
+THEME_SOUND="$HOME/.local/state/omarchy/current/theme/sounds/$NAME.ogg"
+[[ -f $THEME_SOUND ]] || exit 0
+setsid paplay "$THEME_SOUND" >/dev/null 2>&1 &
+exit 0

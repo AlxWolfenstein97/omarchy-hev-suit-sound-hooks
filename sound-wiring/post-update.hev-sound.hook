@@ -1,0 +1,52 @@
+#!/bin/bash
+# Omarchy fires post-update mid-pipeline (after system pkgs + migrations, before
+# AUR / mise). Capture the omarchy-update PID synchronously, then detach a
+# waiter in a new session so we play when that process exits (near
+# press-any-key) — not mid-mise, and not lost to SIGHUP/races.
+LOG="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy/hev-update-sound.log"
+SOUND="${HOME}/.local/bin/omarchy-sound"
+mkdir -p "$(dirname "$LOG")"
+
+find_update_pid() {
+  local pid=$PPID
+  local -a args
+  local a
+  while [[ -n $pid && $pid -gt 1 ]]; do
+    args=()
+    mapfile -d '' -t args <"/proc/$pid/cmdline" 2>/dev/null || return 1
+    for a in "${args[@]}"; do
+      # Exact argv token — not omarchy-update-lock / -mise / log paths.
+      if [[ $a == omarchy-update || $a == */omarchy-update ]]; then
+        printf '%s\n' "$pid"
+        return 0
+      fi
+    done
+    pid=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null) || return 1
+    pid=${pid// /}
+  done
+  return 1
+}
+
+UPDATE_PID=$(find_update_pid || true)
+echo "$(date -Is) hook pid=$$ update_pid=${UPDATE_PID:-none}" >>"$LOG"
+
+setsid -f bash -c "
+trap '' HUP INT TERM
+LOG=$(printf %q "$LOG")
+SOUND=$(printf %q "$SOUND")
+UPDATE_PID=$(printf %q "$UPDATE_PID")
+exec >>\"\$LOG\" 2>&1
+echo \"\$(date -Is) waiter alive update_pid=\${UPDATE_PID:-none} pid=\$\$\"
+if [[ -n \${UPDATE_PID} ]]; then
+  while kill -0 \"\$UPDATE_PID\" 2>/dev/null; do sleep 0.4; done
+  echo \"\$(date -Is) update exited; playing\"
+else
+  echo \"\$(date -Is) no update parent; playing now\"
+fi
+if [[ -x \$SOUND ]]; then
+  \"\$SOUND\" update
+  echo \"\$(date -Is) play done\"
+else
+  echo \"\$(date -Is) missing \$SOUND\"
+fi
+"
